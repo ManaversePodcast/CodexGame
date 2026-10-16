@@ -56,16 +56,18 @@ Create a room and share its code, choose your fighter and Solar/Lunar team, and 
 | Action | Keyboard | Standard gamepad |
 | --- | --- | --- |
 | Move / aim | WASD or arrows | Left stick / D-pad |
-| Jump / air jump | Space | A / Cross |
+| Jump / air jump | Space, W or ↑ | A / Cross (optional stick-up jump) |
 | Attack | J | X / Square |
 | Special | K | Y / Triangle |
 | Guard / directional dodge | L or Shift | Right trigger / bumper |
 | Drop through one-way platform | Down + jump | Down + jump |
 | Recovery special | Up + special | Up + special |
 
-Direction selects up, down, or forward attacks; neutral attacks use your facing direction. Jump is a separate button. Release and press again for a second jump or another attack. Guard works on the ground; a direction plus guard dodges. Use your recovery special and one air dodge to return to the stage. Falling beyond the blast boundary costs a stock. Eliminated players watch until results and rematch.
+Direction selects up, down, or forward attacks; neutral attacks use your facing direction. Keyboard aim-up also jumps by default; disable "Keyboard aim-up also jumps" in settings to keep aiming and jumping separate. Space remains a dedicated jump button. A brief 40 ms grace period lets up + attack/special take priority over an accidental jump; holding up never repeats jumps. Release and press again for a second jump or another attack. Guard works on the ground; a direction plus guard dodges. Use your recovery special and one air dodge to return to the stage. Falling beyond the blast boundary costs a stock. Eliminated players watch until results and rematch.
 
-The settings menu saves keyboard bindings, high contrast, reduced effects, and separate effects/ambient volume locally. Ping is visible during play. Training can be paused; multiplayer battles keep running.
+The settings menu saves keyboard bindings, keyboard/gamepad tap-up jump options, combat focus, high contrast, reduced effects, and separate effects/ambient volume locally. Matches expand the arena and hide the lobby; use **Show lobby** to reopen it, **Leave match** to exit, or settings to disable automatic focus. A resource strip shows air jump, recovery, dodge, guard, and protection/cooldown state. Ping is visible during play. Training can be paused; multiplayer battles keep running.
+
+Actions pressed within **120 ms** of becoming legal are buffered by the server. A buffered press executes once; it cannot shorten recovery, grant extra air jumps, or carry through respawn/pause/rematch. The newest attack/special replaces the older pending combat action. Ground and air attacks use the same combat tuning as before; sprite animation, hit flashes, and 40–65 ms visual hit-stop do not pause or alter the simulation. Reduced effects disables hit-stop, white impact flashes, and camera shake.
 
 ## Project documentation
 

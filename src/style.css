@@ -249,3 +249,40 @@ dialog::backdrop { background: #040912bd; backdrop-filter: blur(5px); }
 @media (max-width: 850px) { .arena-meta { display: flex; }#fighter-panel { grid-column: 2; grid-row: 1 / span 3; }.rule-line { grid-column: 1; } }
 @media (max-width: 540px) { .brand h1 > span { display: none; }.arena-meta { display: flex; align-items: flex-end; }#room-meta { display: none; }.arena-meta .mode-chip { font-size: 6px; letter-spacing: .2px; }.brand h1 { font-size: 27px; }.bottom-right { display: none; }.arena-corner { font-size: 5px; letter-spacing: .4px; }.top-left { left: 8px; top: 8px; }.bottom-left { left: 8px; bottom: 8px; }.hud-resources { display: none; }.hud-avatar canvas { width: 18px; height: 23px; }.hud-player.empty .hud-avatar { height: 23px; }.hud-stocks { font-size: 5px; }.hud-damage { font-size: 16px; }.controls-strip .text-button { margin-left: 0; }#fighter-panel { grid-column: auto; grid-row: auto; }.rule-line { grid-column: auto; }.event-feed { right: 8px; top: 8px; }.feed-item { font-size: 6px; padding: 4px 5px; }.binding-row small { width: 58px; font-size: 7px; }.binding-row .binding-button { min-width: 80px; }.dialog-content { padding: 18px; } }
 @media (min-width: 541px) and (max-width: 1100px) { .arena-meta { display: flex; }#room-meta { display: none; } }
+
+/* Combat focus keeps the arena and essential resources together. */
+.local-resources { display:flex; justify-content:center; align-items:center; min-height:30px; padding:7px 12px; border:1px solid #344858; border-radius:4px; background:#101c29; color:#c7e5df; font:10px ui-monospace,monospace; letter-spacing:.2px; text-align:center; line-height:1.8; }
+.local-resources.danger { color:#ffc48b; border-color:#9b7046; }
+.header-actions { align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+.combat-focused .workspace { display:block; }
+.combat-focused .side-column, .combat-focused .page-footer { display:none; }
+.combat-focused .site-header { min-height:64px; margin-bottom:10px; }
+.combat-focused .brand h1 { font-size:27px; }
+.combat-focused .brand .eyebrow { display:none; }
+.combat-focused .brand-mark { width:28px; height:30px; }
+.combat-focused .brand-mark::after { width:6px; height:6px; left:11px; top:12px; }
+.combat-focused .arena-heading { min-height:26px; margin:0 0 3px; }
+.combat-focused .arena-heading .eyebrow { display:none; }
+.combat-focused .arena-title { font-size:18px; }
+.combat-focused .arena-meta { flex-direction:row; align-items:center; }
+.combat-focused .match-strip { min-height:45px; margin:0 0 8px; }
+.combat-focused .arena-shell { width:min(100%, calc((100dvh - 360px) * 16 / 9)); min-width:min(100%, 560px); margin-inline:auto; }
+.combat-focused .team-score { font-size:12px; }.combat-focused .team-score strong { font-size:29px; }
+.combat-focused .match-clock { font-size:23px; }
+.combat-focused #hud { margin-top:10px !important; margin-bottom:6px; gap:16px; }
+.combat-focused .hud-player { display:flex; align-items:center; justify-content:center; gap:8px; padding:7px; }
+.combat-focused .hud-avatar { margin:0; }.combat-focused .hud-avatar canvas { width:34px; height:44px; }
+.combat-focused .hud-info { min-width:0; }.combat-focused .hud-name { font-size:10px; margin-bottom:3px; }
+.combat-focused .hud-bottom { flex-direction:row; gap:6px; }.combat-focused .hud-damage { font-size:27px; }
+.combat-focused .hud-stocks { font-size:10px; }.combat-focused .hud-resources { font-size:7px; line-height:1.5; }
+.combat-focused .hud-player.empty { opacity:.25; }.combat-focused .hud-player.empty .hud-avatar { display:none; }
+.combat-focused .notice-strip { min-height:22px; margin-bottom:4px; font-size:10px; }
+.combat-focused .controls-strip { padding:6px 0; margin-bottom:5px; font-size:8px; }
+.combat-focused .local-resources { font-size:10px; min-height:28px; }
+@media (max-width:1100px) { .combat-focused .hud-player { gap:3px; padding:5px 3px; }.combat-focused .hud-avatar canvas { width:25px; height:34px; }.combat-focused .hud-name { font-size:8px; }.combat-focused .hud-stocks { font-size:7px; }.combat-focused .hud-damage { font-size:22px; }.combat-focused .hud-resources { font-size:6px; } }
+@media (max-width:650px) { .combat-focused .site-header { gap:8px; }.combat-focused .brand h1 { font-size:21px; }.combat-focused .brand-mark { display:none; }.combat-focused .header-actions { gap:8px; }.combat-focused .header-actions .text-button { font-size:8px; }.combat-focused .connection-status { display:none; }.combat-focused .hud-player { display:block; }.combat-focused .hud-avatar canvas { width:23px; height:30px; margin:auto; }.combat-focused .hud-name { font-size:7px; }.combat-focused .hud-bottom { flex-direction:column; gap:2px; }.combat-focused .hud-damage { font-size:21px; }.combat-focused .hud-stocks { font-size:6px; }.combat-focused .hud-resources { display:none; }.combat-focused .local-resources { font-size:8px; }.combat-focused .arena-meta { gap:6px; }.combat-focused .arena-title { font-size:15px; }.combat-focused #hud { gap:7px; }.combat-focused .arena-shell { min-width:100%; } }
+.fighter-portrait canvas { width:64px; height:64px; }.fighter-portrait { height:64px; }
+.hud-avatar canvas { width:30px; height:30px; }
+.combat-focused .hud-avatar canvas { width:40px; height:40px; }
+@media (max-width:1100px) { .combat-focused .hud-avatar canvas { width:29px; height:29px; } }
+@media (max-width:650px) { .combat-focused .hud-avatar canvas { width:25px; height:25px; } }

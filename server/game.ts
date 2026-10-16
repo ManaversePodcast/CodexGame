@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { performance } from 'node:perf_hooks';
 import { WebSocket, WebSocketServer, type VerifyClientCallbackSync } from 'ws';
 import { FIGHTER_IDS, idle, parseInput, TICK_RATE, type Input, type Player, type RoomState, type ServerMessage, type Team } from '../shared/game.js';
-import { createPlayer, createRoom, resetLobby, startMatch, stepRoom } from '../shared/simulation.js';
+import { clearPlayerInput, createPlayer, createRoom, resetLobby, startMatch, stepRoom } from '../shared/simulation.js';
 
 /** Shorter windows are useful for integration tests; production keeps the design's 30-second reservation. */
 export type GameOptions = { reconnectMs?: number; emptyRoomMs?: number; heartbeatMs?: number };
@@ -70,7 +70,7 @@ export function attachGame(server: Server, options: GameOptions = {}) {
     if (host?.socket && host.player.connected) return;
     room.state.host = [...room.sessions.values()].find(session => session.socket && session.player.connected)?.player.id ?? '';
   }
-  function clearInput(session: Session) { session.input = idle(); session.pending = idle(); session.updated = 0; }
+  function clearInput(session: Session) { session.input = idle(); session.pending = idle(); session.updated = 0; clearPlayerInput(session.player); }
   function forfeit(session: Session) {
     session.forfeited = true;
     clearInput(session);

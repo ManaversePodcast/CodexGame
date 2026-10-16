@@ -2,15 +2,17 @@ import { ARENA, FIGHTERS, MATCH_SECONDS, idle, type AttackView, type FighterId, 
 
 const GRAVITY = 1580;
 const DT = 1 / 60;
+export const INPUT_BUFFER_SECONDS = 0.12;
+type BufferedAction = { input: Input; expires: number };
 interface Runtime {
   previous: Input; hit: Set<string>; emitted: boolean; drop: number; dodgeLock: number; guardDelay: number;
-  ledgeUsed: boolean; lastDamage: Map<string, number>; lastAttacker: string;
+  ledgeUsed: boolean; lastDamage: Map<string, number>; lastAttacker: string; buffer: Partial<Record<'jump' | 'attack' | 'special', BufferedAction>>;
 }
 const runtimes = new WeakMap<Player, Runtime>();
 const clocks = new WeakMap<RoomState, { time: number; id: number }>();
 function runtime(p: Player): Runtime {
   let value = runtimes.get(p);
-  if (!value) { value = { previous: idle(), hit: new Set(), emitted: false, drop: 0, dodgeLock: 0, guardDelay: 0, ledgeUsed: false, lastDamage: new Map(), lastAttacker: '' }; runtimes.set(p, value); }
+  if (!value) { value = { previous: idle(), hit: new Set(), emitted: false, drop: 0, dodgeLock: 0, guardDelay: 0, ledgeUsed: false, lastDamage: new Map(), lastAttacker: '', buffer: {} }; runtimes.set(p, value); }
   return value;
 }
 function clock(room: RoomState) {
@@ -18,6 +20,7 @@ function clock(room: RoomState) {
   if (!value) { value = { time: 0, id: 0 }; clocks.set(room, value); }
   return value;
 }
+export function clearPlayerInput(p: Player) { const rt = runtime(p); rt.buffer = {}; rt.previous = idle(); }
 export const bodySize = (p: Player) => p.fighter === 'rivet' ? { width: 32, height: 44 } : { width: 24, height: 40 };
 export function createPlayer(id: string, name: string, fighter: FighterId = 'kestrel', team: Team = 'sun'): Player {
   return { id, name, fighter, team, ready: false, connected: true, spectator: false,
@@ -39,7 +42,9 @@ function spawn(room: RoomState, p: Player, protection: number) {
   p.vx = 0; p.vy = 0; p.facing = p.team === 'sun' ? 1 : -1; p.grounded = true; p.jumps = 0;
   p.damage = 0; p.guard = 100; p.guarding = false; p.dodge = 0; p.invulnerable = protection;
   p.stun = 0; p.respawn = 0; p.cooldown = 0; p.attack = null; p.recoveryUsed = false; p.airDodgeUsed = false; p.ledge = 0; p.charge = 0;
+  const previous = { ...runtime(p).previous };
   runtimes.delete(p);
+  runtime(p).previous = previous;
 }
 export function startMatch(room: RoomState) {
   room.phase = 'countdown'; room.countdown = 3; room.remaining = MATCH_SECONDS; room.winner = null; room.reason = ''; room.paused = false;
@@ -61,22 +66,22 @@ export function resetLobby(room: RoomState) {
   }
 }
 export function finishMatch(room: RoomState, reason = 'Time limit') {
-  if (room.phase !== 'active') return;
+  if (room.phase !== 'active') { for (const p of room.players) clearPlayerInput(p); return; }
   const lives = (team: Team) => room.players.filter(p => p.team === team).reduce((sum, p) => sum + p.stocks, 0);
   const damage = (team: Team) => room.players.filter(p => p.team === team && p.stocks > 0).reduce((sum, p) => sum + p.damage, 0);
   const sun = lives('sun'), moon = lives('moon');
   room.winner = sun !== moon ? (sun > moon ? 'sun' : 'moon') : damage('sun') !== damage('moon') ? (damage('sun') < damage('moon') ? 'sun' : 'moon') : 'draw';
   room.phase = 'results'; room.reason = reason; room.projectiles = []; room.fields = []; room.paused = false;
-  for (const p of room.players) { p.attack = null; p.guarding = false; p.charge = 0; }
+  for (const p of room.players) { p.attack = null; p.guarding = false; p.charge = 0; clearPlayerInput(p); }
 }
-function event(room: RoomState, kind: 'hit' | 'ko' | 'guard' | 'respawn', p: Player, text: string) {
-  room.events.push({ id: ++clock(room).id, kind, x: p.x, y: p.y, text, team: p.team });
+function event(room: RoomState, kind: 'hit' | 'ko' | 'guard' | 'respawn', p: Player, text: string, detail: Partial<import('./game.js').GameEvent> = {}) {
+  room.events.push({ id: ++clock(room).id, kind, x: p.x, y: p.y, text, team: p.team, tick: room.tick, victim: p.id, ...detail });
   if (room.events.length > 12) room.events.shift();
 }
 function loseLife(room: RoomState, p: Player) {
   p.stocks = room.training ? 3 : Math.max(0, p.stocks - 1);
   p.falls++; p.respawn = p.stocks ? 2 : 0; p.attack = null; p.charge = 0; p.ledge = 0;
-  p.guarding = false; p.vx = p.vy = 0;
+  p.guarding = false; p.vx = p.vy = 0; runtime(p).buffer = {};
   room.projectiles = room.projectiles.filter(q => q.owner !== p.id); room.fields = room.fields.filter(q => q.owner !== p.id);
   const rt = runtime(p), now = clock(room).time;
   const credit = room.players.find(q => q.id === rt.lastAttacker && q.team !== p.team && now - (rt.lastDamage.get(q.id) ?? -Infinity) <= 10);
@@ -152,9 +157,9 @@ function hurt(room: RoomState, victim: Player, attacker: Player, damage: number,
   victim.vx = dx * force * (pulling ? -0.65 : 1);
   victim.vy = dy === 0 ? -force * 0.48 : dy * force * 0.9;
   victim.stun = Math.min(0.64, 0.12 + force / 2600); victim.grounded = false; victim.ledge = 0;
-  victim.attack = null; victim.charge = 0; victim.invulnerable = 0.085;
+  victim.attack = null; victim.charge = 0; victim.invulnerable = 0.085; runtime(victim).buffer = {};
   const rt = runtime(victim); rt.lastAttacker = attacker.id; rt.lastDamage.set(attacker.id, clock(room).time);
-  event(room, 'hit', victim, `${Math.round(damage)}`);
+  event(room, 'hit', victim, `${Math.round(damage)}`, { attacker: attacker.id, dx: victim.vx, dy: victim.vy, damage });
 }
 function attackHits(room: RoomState, p: Player, a: AttackView) {
   if (a.kind === 'counter' || a.kind === 'field' || a.kind === 'cannon' || a.kind === 'shard' || a.kind === 'shockwave') return;
@@ -199,15 +204,29 @@ function updatePlayer(room: RoomState, p: Player, supplied: Input, dt: number) {
   const rt = runtime(p), f = FIGHTERS[p.fighter];
   const input = p.connected ? supplied : idle();
   const previous = rt.previous; rt.previous = { ...input };
-  if (p.spectator || p.stocks <= 0) return;
+  if (p.spectator || p.stocks <= 0) { rt.buffer = {}; return; }
   if (p.respawn > 0) {
+    rt.buffer = {};
     p.respawn = Math.max(0, p.respawn - dt);
     if (!p.respawn) { spawn(room, p, 2); event(room, 'respawn', p, 'RETURN'); }
     return;
   }
   for (const key of ['invulnerable', 'stun', 'cooldown', 'dodge'] as const) p[key] = Math.max(0, p[key] - dt);
   rt.drop = Math.max(0, rt.drop - dt); rt.dodgeLock = Math.max(0, rt.dodgeLock - dt); rt.guardDelay = Math.max(0, rt.guardDelay - dt);
-  const jump = input.jump && !previous.jump, attackPressed = input.attack && !previous.attack, specialPressed = input.special && !previous.special;
+  const now = clock(room).time;
+  if (!p.connected) rt.buffer = {};
+  for (const action of ['jump', 'attack', 'special'] as const) {
+    if (rt.buffer[action] && rt.buffer[action]!.expires < now) delete rt.buffer[action];
+    if (p.connected && input[action] && !previous[action]) {
+      rt.buffer[action] = { input: { ...input }, expires: now + INPUT_BUFFER_SECONDS };
+      if (action === 'attack') delete rt.buffer.special;
+      if (action === 'special') delete rt.buffer.attack;
+    }
+  }
+  // Up + attack/special is an aiming chord, never an extra tap-up jump.
+  if (input.up && (input.attack || input.special)) delete rt.buffer.jump;
+  const jump = Boolean(rt.buffer.jump);
+  let jumpedThisTick = false;
   const axis = Number(input.right) - Number(input.left);
   if (p.ledge > 0) {
     p.ledge = Math.max(0, p.ledge - dt);
@@ -232,11 +251,12 @@ function updatePlayer(room: RoomState, p: Player, supplied: Input, dt: number) {
       p.vx = (axis || p.facing) * 480; if (!p.grounded) p.vy *= 0.25;
     }
     if (jump && !p.attack && p.charge === 0 && !p.guarding && !p.dodge) {
+      const jumpInput = rt.buffer.jump!.input;
       const platform = ARENA.platforms.find(q => !q.solid && Math.abs(p.y + bodySize(p).height / 2 - q.y) < 3);
-      if (input.down && p.grounded && platform) { rt.drop = 0.27; p.y += 4; p.vy = 80; p.grounded = false; }
-      else if (p.grounded || p.jumps < 2) { p.vy = -f.jump; p.jumps = p.grounded ? 1 : p.jumps + 1; p.grounded = false; }
+      if (jumpInput.down && p.grounded && platform) { rt.drop = 0.27; p.y += 4; p.vy = 80; p.grounded = false; delete rt.buffer.jump; }
+      else if (p.grounded || p.jumps < 2) { p.vy = -f.jump; jumpedThisTick = true; p.jumps = p.grounded ? 1 : p.jumps + 1; p.grounded = false; delete rt.buffer.jump; }
     }
-    if (!input.jump && previous.jump && p.vy < -230 && !p.attack) p.vy *= 0.55;
+    if (!input.jump && (previous.jump || jumpedThisTick) && p.vy < -230 && !p.attack) p.vy *= 0.55;
     if (p.charge > 0) {
       p.charge = Math.min(0.85, p.charge + dt);
       if (!input.special || p.charge >= 0.85) {
@@ -247,8 +267,17 @@ function updatePlayer(room: RoomState, p: Player, supplied: Input, dt: number) {
       }
     }
     if (!p.attack && p.charge === 0 && !p.dodge && !p.guarding) {
-      if (specialPressed) special(room, p, input);
-      else if (attackPressed) attack(p, input);
+      const queuedSpecial = rt.buffer.special;
+      const queuedAttack = rt.buffer.attack;
+      if (queuedSpecial && (queuedSpecial.input.up ? !p.recoveryUsed : p.cooldown <= 0)) {
+        const aim = queuedSpecial.input;
+        if (aim.left !== aim.right) p.facing = aim.right ? 1 : -1;
+        special(room, p, aim); delete rt.buffer.special;
+      } else if (queuedAttack) {
+        const aim = queuedAttack.input;
+        if (aim.left !== aim.right) p.facing = aim.right ? 1 : -1;
+        attack(p, aim); delete rt.buffer.attack;
+      }
     }
   }
   const dash = p.attack && ['dash', 'blink'].includes(p.attack.kind) && p.attack.age < p.attack.startup + p.attack.active;
@@ -281,14 +310,15 @@ function updatePlayer(room: RoomState, p: Player, supplied: Input, dt: number) {
   }
 }
 export function stepRoom(room: RoomState, inputs: Map<string, Input>, dt = DT) {
-  if (room.paused) return;
+  if (room.paused) { for (const p of room.players) clearPlayerInput(p); return; }
   room.tick++;
   if (room.phase === 'countdown') {
+    for (const p of room.players) { runtime(p).buffer = {}; runtime(p).previous = { ...(inputs.get(p.id) ?? idle()) }; }
     room.countdown = Math.max(0, room.countdown - dt);
     if (room.countdown <= 0.00001) { room.countdown = 0; room.phase = 'active'; }
     return;
   }
-  if (room.phase !== 'active') return;
+  if (room.phase !== 'active') { for (const p of room.players) clearPlayerInput(p); return; }
   clock(room).time += dt;
   if (!room.training) room.remaining = Math.max(0, room.remaining - dt);
   for (const p of room.players) updatePlayer(room, p, inputs.get(p.id) ?? idle(), dt);

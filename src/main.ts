@@ -1,36 +1,24 @@
 import Phaser from 'phaser';
 import { ARENA, FIGHTERS, FIGHTER_IDS, idle, teamName, type ClientMessage, type FighterId, type Input, type Player, type RoomState, type ServerMessage, type Team } from '../shared/game';
 import './style.css';
+import { TapJumpController } from './controls';
+import { makePortrait, makeFighterSheet, fighterFrame, FRAME_SIZE, FRAMES, POSES } from './fighter-art';
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 const safeRead = <T>(key: string, fallback: T): T => { try { return JSON.parse(localStorage.getItem(key) || 'null') ?? fallback; } catch { return fallback; } };
 const escapeKey = (code: string | undefined): string => !code ? '—' : ({ Space: 'SPACE', ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', ShiftLeft: 'SHIFT', ShiftRight: 'SHIFT' }[code] || code.replace('Key', '').replace('Digit', ''));
 const teamColor = (team: Team) => team === 'sun' ? 0xf6c65b : 0x71d8ed;
 const defaultBindings: Record<keyof Input, string[]> = { left: ['KeyA', 'ArrowLeft'], right: ['KeyD', 'ArrowRight'], up: ['KeyW', 'ArrowUp'], down: ['KeyS', 'ArrowDown'], jump: ['Space'], attack: ['KeyJ'], special: ['KeyK'], guard: ['KeyL', 'ShiftLeft', 'ShiftRight'] };
-const settings = safeRead('riftfall-settings-v1', { contrast: false, reduced: window.matchMedia('(prefers-reduced-motion: reduce)').matches, effects: 0.45, music: 0.12, bindings: defaultBindings });
+const settingDefaults = { contrast: false, reduced: window.matchMedia('(prefers-reduced-motion: reduce)').matches, effects: 0.45, music: 0.12, tapJump: true, gamepadTapJump: false, combatView: true, bindings: defaultBindings };
+const settings = { ...settingDefaults, ...safeRead<Partial<typeof settingDefaults>>('riftfall-settings-v1', {}) };
+const tapJump = new TapJumpController();
 settings.bindings = { ...defaultBindings, ...settings.bindings };
 const saveSettings = () => { try { localStorage.setItem('riftfall-settings-v1', JSON.stringify(settings)); } catch { /* Storage may be unavailable in private browsing. */ } };
-
-// Original 16-pixel sprites. The same art is used for menu portraits and arena fighters.
-const art: Record<FighterId, string[]> = {
-  kestrel: ['     11111      ', '    1222221     ', '   122222221    ', '   123333321    ', '   123333321    ', '    1222221     ', '   144224441    ', '  14442244441   ', '  144422444411  ', '  1222222225551 ', '  1222222225551 ', '   12266222551  ', '   122222221    ', '   122222221    ', '   122112221    ', '   144114441    ', '   144114441    ', '   111111111    '],
-  rivet: ['     111111     ', '    12222221    ', '   1222222221   ', '   1333333331   ', '   1333333331   ', '    12222221 11 ', '  11444444411661', ' 122244224221661', '1222244224221661', '1222222222221661', ' 12222222221151 ', ' 12222662221 51 ', ' 12222222221 51 ', ' 12222222221 51 ', '  1222112221 51 ', '  1444114441    ', '  1444114441    ', '  1111111111    '],
-  wisp: ['      1111      ', '     122221     ', '    12222221    ', '    13333331    ', '     122221     ', '    14422441    ', '    14422441    ', '   1442224441   ', '   1422222241   ', '  151222222151  ', ' 16512222221561 ', '1651 122221 1561', ' 61  122221  16 ', '     121121     ', '    14411441    ', '    14411441    ', '    14411441    ', '    11111111    '],
-  morrow: ['      1161      ', '     126221     ', '    12262221    ', '    13333331    ', '     122221     ', '    14422441    ', '   1444224441   ', '  144422444441  ', '  144222244441  ', '  122222224661  ', '  122222224661  ', '   1226622261   ', '   122222221    ', '   144224441    ', '  14442244441   ', '   144114441    ', '    1411441     ', '    1111111     '],
-};
-function makePortrait(fighter: FighterId, scale = 4) {
-  const canvas = document.createElement('canvas'); canvas.width = 16 * scale; canvas.height = 20 * scale;
-  canvas.setAttribute('aria-hidden', 'true');
-  const ctx = canvas.getContext('2d')!;
-  const palettes = { kestrel: ['#090e1b', '#dca950', '#c5f1fa', '#f4d590', '#61849b', '#8ce6ff'], rivet: ['#090e1b', '#c96f54', '#b5e7ec', '#efaa75', '#91abb8', '#e5dfba'], wisp: ['#090e1b', '#837bc7', '#c8efff', '#b7a9f2', '#798ed9', '#9df2f2'], morrow: ['#090e1b', '#559e96', '#ceffff', '#8fdcc6', '#508780', '#a3f9e4'] };
-  art[fighter].forEach((row, y) => [...row].forEach((pixel, x) => { const n = Number(pixel); if (n) { ctx.fillStyle = palettes[fighter][n - 1]; ctx.fillRect(x * scale, (y + 1) * scale, scale, scale); } }));
-  return canvas;
-}
 
 $('#app').innerHTML = `
   <header class="site-header">
     <a class="brand" href="/" aria-label="Riftfall home"><span class="brand-mark" aria-hidden="true">R<span>✦</span></span><div><div class="eyebrow">ORBITAL COMBAT DIVISION</div><h1>RIFTFALL<span>PROTOTYPE</span></h1></div></a>
-    <div class="header-actions"><div class="connection-status"><span id="connection-dot"></span><span id="connection-label">Connecting</span></div><button id="settings-button" class="icon-button" title="Controls and settings" aria-label="Controls and settings">⚙</button></div>
+    <div class="header-actions"><button id="combat-view" class="text-button hidden">Show lobby</button><button id="combat-leave" class="text-button hidden">Leave match</button><div class="connection-status"><span id="connection-dot"></span><span id="connection-label">Connecting</span></div><button id="settings-button" class="icon-button" title="Controls and settings" aria-label="Controls and settings">⚙</button></div>
   </header>
   <main class="workspace">
     <section class="play-column" aria-label="Arena">
@@ -40,6 +28,7 @@ $('#app').innerHTML = `
       <div id="hud" class="hud"><div class="team-hud sun" id="sun-hud"></div><div class="team-hud moon" id="moon-hud"></div></div>
       <div class="notice-strip" id="notice-strip"><span class="notice-icon">i</span><span id="notice">Welcome to Relay Station. Start with solo training or invite a rival to a private room.</span></div>
       <div class="controls-strip" id="controls-strip"></div>
+      <div id="local-resources" class="local-resources hidden" aria-label="Your recovery resources"></div>
     </section>
     <aside class="side-column">
       <section class="panel" id="entry-panel"><div class="panel-heading"><span class="panel-number">01</span><h2 class="panel-title">Enter the arena</h2><span class="status-pill">ONLINE</span></div><p class="panel-intro">A crew of ten. A station on the edge.<br>Pick your side and make every life count.</p><div class="field"><label for="player-name">CALLSIGN</label><input id="player-name" maxlength="20" placeholder="Enter your callsign" autocomplete="nickname"></div><div class="entry-actions"><button id="create-room" class="primary-button">Create private room <span>↗</span></button><button id="train" class="secondary-button">Solo training <span>⌁</span></button></div><div class="separator"><span>HAVE AN INVITE?</span></div><form id="join-form"><label class="small-label" for="join-code">ROOM CODE</label><div class="join-line"><input id="join-code" placeholder="ABC123" maxlength="6" aria-label="Room code" autocomplete="off" autocapitalize="characters"><button class="secondary-button" type="submit">Join →</button></div></form><p class="help-text">No account needed. Share a room code with your friends to play together.</p></section>
@@ -50,7 +39,7 @@ $('#app').innerHTML = `
     </aside>
   </main>
   <footer class="page-footer"><span><i class="footer-dot"></i> ORIGINAL PIXEL COMBAT / BUILT FOR YOUR BROWSER</span><span id="footer-hint">LOSE THREE LIVES. YOUR TEAM FIGHTS ON.</span></footer>
-  <dialog id="settings-dialog"><div class="dialog-content"><div class="dialog-header"><div><span class="eyebrow">FLIGHT COMPUTER</span><h2>Controls & settings</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div><p class="help-text">Keyboard or a standard gamepad. Menus do not pause multiplayer matches.</p><div id="bindings"></div><button class="text-button" id="reset-bindings">Restore default controls</button><div class="settings-divider"></div><label class="settings-row"><span>High contrast team outlines</span><input type="checkbox" id="high-contrast"></label><label class="settings-row"><span>Reduce shake & effects</span><input type="checkbox" id="reduce-effects"></label><label class="settings-row"><span>Effects volume</span><input type="range" min="0" max="1" step="0.05" id="effects-volume"></label><label class="settings-row"><span>Ambient audio volume</span><input type="range" min="0" max="1" step="0.05" id="music-volume"></label><p class="help-text" id="controller-status">Gamepad: connect a controller and press a button.</p></div></dialog><div class="toast hidden" id="toast" role="status"></div>
+  <dialog id="settings-dialog"><div class="dialog-content"><div class="dialog-header"><div><span class="eyebrow">FLIGHT COMPUTER</span><h2>Controls & settings</h2></div><button id="close-settings" class="icon-button" aria-label="Close settings">×</button></div><p class="help-text">Keyboard or a standard gamepad. Menus do not pause multiplayer matches.</p><label class="settings-row"><span>Keyboard aim-up also jumps</span><input type="checkbox" id="tap-jump"></label><label class="settings-row"><span>Gamepad stick / D-pad up also jumps</span><input type="checkbox" id="gamepad-tap-jump"></label><label class="settings-row"><span>Focus arena during matches</span><input type="checkbox" id="combat-view-setting"></label><div id="bindings"></div><button class="text-button" id="reset-bindings">Restore default controls</button><div class="settings-divider"></div><label class="settings-row"><span>High contrast team outlines</span><input type="checkbox" id="high-contrast"></label><label class="settings-row"><span>Reduce shake & effects</span><input type="checkbox" id="reduce-effects"></label><label class="settings-row"><span>Effects volume</span><input type="range" min="0" max="1" step="0.05" id="effects-volume"></label><label class="settings-row"><span>Ambient audio volume</span><input type="range" min="0" max="1" step="0.05" id="music-volume"></label><p class="help-text" id="controller-status">Gamepad: connect a controller and press a button.</p></div></dialog><div class="toast hidden" id="toast" role="status"></div>
 `;
 
 const tutorial: Record<FighterId, { copy: string; special: string; recovery: string }> = {
@@ -156,6 +145,13 @@ let lobbyReadyKey = '';
 
 let resultsKey = '';
 function render() {
+  const fighting = Boolean(room && (room.phase === 'active' || room.phase === 'countdown'));
+  document.body.classList.toggle('combat-focused', fighting && settings.combatView);
+  $('#combat-view').classList.toggle('hidden', !fighting);
+  $('#combat-leave').classList.toggle('hidden', !fighting);
+  $('#combat-view').textContent = settings.combatView ? 'Show lobby' : 'Focus arena';
+  $<HTMLInputElement>('#combat-view-setting').checked = settings.combatView;
+  $('#combat-view').setAttribute('aria-pressed', String(settings.combatView));
   $('#pause-training').classList.toggle('hidden', !room?.training || room.phase !== 'active' || room.host !== localId);
   $('#pause-training').textContent = room?.paused ? 'Resume ▶' : 'Pause Ⅱ';
   $('#entry-panel').classList.toggle('hidden', Boolean(room)); $('#room-panel').classList.toggle('hidden', !room); $('#results-panel').classList.toggle('hidden', room?.phase !== 'results');
@@ -190,6 +186,14 @@ function render() {
   renderHUD(); renderFighter();
 }
 function renderHUD() {
+  const me = room?.players.find(p => p.id === localId);
+  const resources = $('#local-resources');
+  resources.classList.toggle('hidden', !room || room.phase !== 'active' || !me || me.spectator);
+  if (me) {
+    resources.classList.toggle('danger', me.stocks === 1);
+    resources.textContent = me.stocks <= 0 ? 'ELIMINATED · YOUR TEAM FIGHTS ON' : me.respawn > 0 ? `RESPAWNING IN ${Math.ceil(me.respawn)}s · ${me.stocks} LIVES LEFT` :
+      `AIR JUMP ${me.jumps < 2 ? '●' : '○'}   ·   RECOVERY ${me.recoveryUsed ? '○ USED' : '● READY'}   ·   AIR DODGE ${me.airDodgeUsed ? '○ USED' : '● READY'}   ·   GUARD ${Math.round(me.guard)}   ·   ${me.invulnerable > 0 ? 'PROTECTED' : me.cooldown > 0 ? `SPECIAL ${me.cooldown.toFixed(1)}s` : 'SPECIAL READY'}`;
+  }
   for (const team of ['sun', 'moon'] as Team[]) {
     const players = room?.players.filter(p => p.team === team && !p.spectator) || [];
     for (let i = 0; i < 5; i++) {
@@ -200,14 +204,14 @@ function renderHUD() {
       const stocks = p ? room?.phase === 'lobby' ? 3 : p.stocks : 0;
       const percent = slot.querySelector<HTMLElement>('.hud-damage')!; percent.textContent = p ? `${Math.round(p.damage)}%` : '—'; percent.style.color = p && p.damage >= 120 ? '#ff806d' : p && p.damage >= 70 ? '#f6c65b' : '';
       slot.querySelector('.hud-stocks')!.textContent = p ? '◆'.repeat(stocks) + '◇'.repeat(Math.max(0, 3 - stocks)) : '· · ·';
-      slot.querySelector('.hud-resources')!.textContent = p ? p.stocks <= 0 && room?.phase !== 'lobby' ? 'ELIMINATED' : !p.connected ? 'RECONNECTING' : p.respawn > 0 ? `RESPAWN ${Math.ceil(p.respawn)}` : `${p.recoveryUsed ? '↑ USED' : '↑ READY'} · ${Math.round(p.guard)} GUARD` : 'AWAITING PILOT';
+      slot.querySelector('.hud-resources')!.textContent = p ? p.stocks <= 0 && room?.phase !== 'lobby' ? 'ELIMINATED' : !p.connected ? 'RECONNECTING' : p.respawn > 0 ? `RESPAWN ${Math.ceil(p.respawn)}` : `J${Math.max(0, 2 - p.jumps)} · R${p.recoveryUsed ? '○' : '●'} · G${Math.round(p.guard)}` : 'AWAITING PILOT';
     }
   }
 }
 
 function renderBindings() {
   $('#bindings').replaceChildren();
-  const names: Record<keyof Input, string> = { left: 'Move left', right: 'Move right', up: 'Aim up', down: 'Crouch / aim down', jump: 'Jump / air jump', attack: 'Attack', special: 'Special / recovery', guard: 'Guard / dodge' };
+  const names: Record<keyof Input, string> = { left: 'Move left', right: 'Move right', up: 'Aim up / tap jump', down: 'Crouch / aim down', jump: 'Jump / air jump', attack: 'Attack', special: 'Special / recovery', guard: 'Guard / dodge' };
   const pads: Record<keyof Input, string> = { left: '← stick', right: '→ stick', up: '↑ stick', down: '↓ stick', jump: 'A / Cross', attack: 'X / Square', special: 'Y / Triangle', guard: 'RT / R2' };
   for (const action of Object.keys(names) as (keyof Input)[]) { const row = document.createElement('div'); row.className = 'binding-row'; const label = document.createElement('span'); label.textContent = names[action]; const button = document.createElement('button'); button.className = 'binding-button'; button.textContent = settings.bindings[action].map(escapeKey).join(' / '); button.onclick = () => { bindTarget = action; button.textContent = 'Press a key…'; }; const pad = document.createElement('small'); pad.textContent = pads[action]; row.append(label, button, pad); $('#bindings').append(row); }
   renderControlHints();
@@ -216,12 +220,18 @@ function renderControlHints() {
   const specialKey = escapeKey(settings.bindings.special[0]);
   document.querySelectorAll<HTMLElement>('.ability-row kbd').forEach((key, index) => { key.textContent = `${index ? '↑ ' : ''}${specialKey}`; });
   const controls = $('#controls-strip'); controls.replaceChildren();
-  for (const [action, label] of [['left', 'MOVE'], ['jump', 'JUMP'], ['attack', 'ATTACK'], ['special', 'SPECIAL'], ['guard', 'GUARD / DODGE']] as [keyof Input, string][]) { const hint = document.createElement('span'); const key = document.createElement('kbd'); key.textContent = action === 'left' ? `${escapeKey(settings.bindings.left[0])} ${escapeKey(settings.bindings.right[0])}` : escapeKey(settings.bindings[action][0]); hint.append(key, ` ${label}`); controls.append(hint); }
+  for (const [action, label] of [['left', 'MOVE'], ['jump', 'JUMP'], ['attack', 'ATTACK'], ['special', 'SPECIAL'], ['guard', 'GUARD / DODGE']] as [keyof Input, string][]) { const hint = document.createElement('span'); const key = document.createElement('kbd'); key.textContent = action === 'left' ? `${escapeKey(settings.bindings.left[0])} ${escapeKey(settings.bindings.right[0])}` : action === 'jump' && settings.tapJump ? `${escapeKey(settings.bindings.up[0])} / ${escapeKey(settings.bindings.jump[0])}` : escapeKey(settings.bindings[action][0]); hint.append(key, ` ${label}`); controls.append(hint); }
   const gamepad = document.createElement('button'); gamepad.className = 'text-button'; gamepad.textContent = '⌘ Controls'; gamepad.onclick = () => openSettings(); controls.append(gamepad);
 }
-function openSettings() { held.clear(); bindTarget = null; renderBindings(); dialog.showModal(); audio.unlock(); }
+function openSettings() { held.clear(); latched.clear(); tapJump.reset(); bindTarget = null; renderBindings(); dialog.showModal(); audio.unlock(); }
+$('#combat-view').onclick = () => { settings.combatView = !settings.combatView; saveSettings(); render(); };
+$('#combat-leave').onclick = () => { send({ type: 'leave' }); held.clear(); latched.clear(); tapJump.reset(); };
 $('#settings-button').onclick = openSettings; $('#close-settings').onclick = () => dialog.close();
 $('#reset-bindings').onclick = () => { settings.bindings = { ...defaultBindings }; saveSettings(); renderBindings(); };
+for (const [id, key] of [['tap-jump', 'tapJump'], ['gamepad-tap-jump', 'gamepadTapJump'], ['combat-view-setting', 'combatView']] as const) {
+  $<HTMLInputElement>(`#${id}`).checked = settings[key];
+  $(`#${id}`).onchange = () => { settings[key] = $<HTMLInputElement>(`#${id}`).checked; tapJump.reset(); held.clear(); latched.clear(); saveSettings(); renderBindings(); render(); };
+}
 $<HTMLInputElement>('#high-contrast').checked = settings.contrast; $<HTMLInputElement>('#reduce-effects').checked = settings.reduced;
 $<HTMLInputElement>('#effects-volume').value = String(settings.effects); $<HTMLInputElement>('#music-volume').value = String(settings.music);
 function applySettings() { document.body.classList.toggle('high-contrast', settings.contrast); document.body.classList.toggle('reduce-effects', settings.reduced); saveSettings(); }
@@ -251,19 +261,20 @@ window.addEventListener('keydown', event => {
       for (const action of ['jump', 'attack', 'special', 'guard'] as (keyof Input)[]) if (settings.bindings[action].includes(event.code)) { latched.add(action); actionPressed = true; }
       // Capture direction at the instant the action is pressed, even if both keys
       // are released before the next poll (for example a quick up + recovery tap).
-      if (actionPressed) transmitInput();
+      if (actionPressed || settings.tapJump && settings.bindings.up.includes(event.code)) transmitInput();
     }
   }
   if (event.code === 'Escape') { held.clear(); latched.clear(); if (!typing && !dialog.open && room?.training && room.phase === 'active') send({ type: 'pause', paused: !room.paused }); }
 });
-window.addEventListener('keyup', event => held.delete(event.code)); window.addEventListener('blur', () => { held.clear(); latched.clear(); }); document.addEventListener('visibilitychange', () => { if (document.hidden) { held.clear(); latched.clear(); } });
+window.addEventListener('keyup', event => { held.delete(event.code); if (!dialog.open && Object.values(settings.bindings).flat().includes(event.code)) transmitInput(); }); window.addEventListener('blur', () => { held.clear(); latched.clear(); tapJump.reset(); transmitInput(); }); document.addEventListener('visibilitychange', () => { if (document.hidden) { held.clear(); latched.clear(); } });
 function readInput(): Input {
-  const input = idle(); if (!document.hasFocus() || document.hidden || dialog.open || document.activeElement instanceof HTMLInputElement || !online || room?.paused) { latched.clear(); return input; }
+  const input = idle(); if (!document.hasFocus() || document.hidden || dialog.open || document.activeElement instanceof HTMLInputElement || !online || room?.paused || room?.phase !== 'active') { latched.clear(); tapJump.reset(); return input; }
   for (const key of Object.keys(input) as (keyof Input)[]) input[key] = settings.bindings[key].some(code => held.has(code)) || latched.has(key);
   latched.clear();
+  const padInput = idle();
   const pad = Array.from(navigator.getGamepads?.() || []).find(p => p?.connected);
-  if (pad) { const button = (n: number) => Boolean(pad.buttons[n]?.pressed); input.left ||= (pad.axes[0] || 0) < -0.3 || button(14); input.right ||= (pad.axes[0] || 0) > 0.3 || button(15); input.up ||= (pad.axes[1] || 0) < -0.4 || button(12); input.down ||= (pad.axes[1] || 0) > 0.4 || button(13); input.jump ||= button(0); input.attack ||= button(2); input.special ||= button(3); input.guard ||= button(7) || button(5); $('#controller-status').textContent = `Gamepad connected: ${pad.id.slice(0, 60)}`; }
-  return input;
+  if (pad) { const button = (n: number) => Boolean(pad.buttons[n]?.pressed); padInput.left ||= (pad.axes[0] || 0) < -0.3 || button(14); padInput.right ||= (pad.axes[0] || 0) > 0.3 || button(15); padInput.up ||= (pad.axes[1] || 0) < -0.4 || button(12); padInput.down ||= (pad.axes[1] || 0) > 0.4 || button(13); padInput.jump ||= button(0); padInput.attack ||= button(2); padInput.special ||= button(3); padInput.guard ||= button(7) || button(5); $('#controller-status').textContent = `Gamepad connected: ${pad.id.slice(0, 60)}`; }
+  return tapJump.read(input, padInput, settings.tapJump, settings.gamepadTapJump, performance.now());
 }
 
 class Synth {
@@ -272,11 +283,11 @@ class Synth {
   private last = new Map<string, number>();
   unlock() { if (!this.context) { try { this.context = new AudioContext(); this.ambient = this.context.createGain(); this.ambient.connect(this.context.destination); for (const f of [55, 82.41, 110.12]) { const oscillator = this.context.createOscillator(); oscillator.type = 'sine'; oscillator.frequency.value = f; const gain = this.context.createGain(); gain.gain.value = 0.055; oscillator.connect(gain); gain.connect(this.ambient); oscillator.start(); } this.updateVolume(); } catch { return; } } void this.context.resume(); }
   updateVolume() { if (this.context && this.ambient) this.ambient.gain.setTargetAtTime(settings.music, this.context.currentTime, 0.15); }
-  play(kind: string) { const context = this.context; if (!context || context.state !== 'running' || settings.effects <= 0) return; const now = performance.now(); if (now - (this.last.get(kind) || -Infinity) < (kind === 'hit' ? 65 : 100)) return; this.last.set(kind, now); const oscillator = context.createOscillator(), gain = context.createGain(), t = context.currentTime; const params: Record<string, [number, number, number]> = { hit: [170, 65, 0.09], guard: [470, 220, 0.1], ko: [160, 28, 0.35], spawn: [300, 750, 0.18], select: [400, 650, 0.05], start: [220, 880, 0.4], finish: [660, 330, 0.65] }; const [from, to, duration] = params[kind] || params.hit; oscillator.type = kind === 'hit' || kind === 'ko' ? 'triangle' : 'sine'; oscillator.frequency.setValueAtTime(from, t); oscillator.frequency.exponentialRampToValueAtTime(to, t + duration); gain.gain.setValueAtTime(settings.effects * 0.13, t); gain.gain.exponentialRampToValueAtTime(0.001, t + duration); oscillator.connect(gain); gain.connect(context.destination); oscillator.start(t); oscillator.stop(t + duration); }
+  play(kind: string) { const context = this.context; if (!context || context.state !== 'running' || settings.effects <= 0) return; const now = performance.now(); if (now - (this.last.get(kind) || -Infinity) < (kind === 'hit' ? 65 : 100)) return; this.last.set(kind, now); const oscillator = context.createOscillator(), gain = context.createGain(), t = context.currentTime; const params: Record<string, [number, number, number]> = { hit: [210, 55, 0.12], heavy: [95, 26, 0.2], guard: [470, 220, 0.1], ko: [160, 28, 0.35], spawn: [300, 750, 0.18], select: [400, 650, 0.05], start: [220, 880, 0.4], finish: [660, 330, 0.65] }; const [from, to, duration] = params[kind] || params.hit; oscillator.type = kind === 'hit' || kind === 'heavy' || kind === 'ko' ? 'triangle' : 'sine'; oscillator.frequency.setValueAtTime(from, t); oscillator.frequency.exponentialRampToValueAtTime(to, t + duration); gain.gain.setValueAtTime(settings.effects * 0.13, t); gain.gain.exponentialRampToValueAtTime(0.001, t + duration); oscillator.connect(gain); gain.connect(context.destination); oscillator.start(t); oscillator.stop(t + duration); }
 }
 const audio = new Synth();
 
-interface Actor { container: Phaser.GameObjects.Container; sprite: Phaser.GameObjects.Image; marker: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text; edge: Phaser.GameObjects.Text; fighter: FighterId; x: number; y: number; }
+interface Actor { container: Phaser.GameObjects.Container; sprite: Phaser.GameObjects.Image; marker: Phaser.GameObjects.Graphics; label: Phaser.GameObjects.Text; edge: Phaser.GameObjects.Text; fighter: FighterId; x: number; y: number; freezeUntil: number; flashUntil: number; landingUntil: number; }
 class RelayStation extends Phaser.Scene {
   private actors = new Map<string, Actor>();
   private effects!: Phaser.GameObjects.Graphics;
@@ -287,7 +298,10 @@ class RelayStation extends Phaser.Scene {
   private particles = 0;
   private lastGround = new Map<string, boolean>();
   create() {
-    for (const id of FIGHTER_IDS) this.textures.addCanvas(`fighter-${id}`, makePortrait(id, 2));
+    for (const id of FIGHTER_IDS) {
+      const texture = this.textures.addCanvas(`fighter-${id}`, makeFighterSheet(id))!;
+      for (let row = 0; row < POSES.length; row++) for (let column = 0; column < FRAMES; column++) texture.add(row * FRAMES + column, 0, column * FRAME_SIZE, row * FRAME_SIZE, FRAME_SIZE, FRAME_SIZE);
+    }
     this.drawBackground(); this.drawStation();
     this.scenery = this.add.graphics().setDepth(4);
     this.effects = this.add.graphics().setDepth(36);
@@ -354,11 +368,11 @@ class RelayStation extends Phaser.Scene {
   }
   private spawnActor(p: Player): Actor {
     const marker = this.add.graphics();
-    const sprite = this.add.image(0, -2, `fighter-${p.fighter}`);
+    const sprite = this.add.image(0, 0, `fighter-${p.fighter}`, 0);
     const label = this.add.text(0, -52, '', { fontFamily: 'monospace', fontSize: '12px', fontStyle: 'bold', color: '#e7f2f4', stroke: '#090f20', strokeThickness: 4 }).setOrigin(0.5);
     const container = this.add.container(p.x, p.y, [marker, sprite, label]).setDepth(30);
     const edge = this.add.text(0, 0, '', { fontFamily: 'monospace', fontSize: '15px', fontStyle: 'bold', color: p.team === 'sun' ? '#f6c65b' : '#71d8ed', backgroundColor: '#0a1424', padding: { x: 5, y: 3 } }).setOrigin(0.5).setDepth(100).setVisible(false);
-    const actor: Actor = { container, marker, sprite, label, edge, fighter: p.fighter, x: p.x, y: p.y }; this.actors.set(p.id, actor); return actor;
+    const actor: Actor = { container, marker, sprite, label, edge, fighter: p.fighter, x: p.x, y: p.y, freezeUntil: 0, flashUntil: 0, landingUntil: 0 }; this.actors.set(p.id, actor); return actor;
   }
   update(time: number, delta: number) {
     this.ambientTime += delta;
@@ -390,18 +404,20 @@ class RelayStation extends Phaser.Scene {
     for (const p of activeRoom.players) {
       if (p.spectator) continue;
       const actor = this.actors.get(p.id) || this.spawnActor(p), prev = previous.get(p.id);
-      if (actor.fighter !== p.fighter) { actor.sprite.setTexture(`fighter-${p.fighter}`); actor.fighter = p.fighter; }
+      if (actor.fighter !== p.fighter) { actor.sprite.setTexture(`fighter-${p.fighter}`, 0); actor.fighter = p.fighter; }
       const teleport = !prev || Math.hypot(p.x - prev.x, p.y - prev.y) > 300 || (prev.respawn > 0) !== (p.respawn > 0);
-      actor.x = teleport ? p.x : Phaser.Math.Linear(prev!.x, p.x, progress); actor.y = teleport ? p.y : Phaser.Math.Linear(prev!.y, p.y, progress);
+      const hitStop = !settings.reduced && performance.now() < actor.freezeUntil && !teleport && p.stocks > 0 && p.respawn <= 0;
+      if (!hitStop) { actor.x = teleport ? p.x : Phaser.Math.Linear(prev!.x, p.x, progress); actor.y = teleport ? p.y : Phaser.Math.Linear(prev!.y, p.y, progress); }
+      if (this.lastGround.get(p.id) === false && p.grounded) actor.landingUntil = time + 120;
+      const visualPlayer = p.attack && prev?.attack && prev.attack.kind === p.attack.kind && prev.attack.age <= p.attack.age ? { ...p, attack: { ...p.attack, age: Phaser.Math.Linear(prev.attack.age, p.attack.age, progress) } } : p;
+      if (!hitStop) actor.sprite.setFrame(fighterFrame(visualPlayer, activeRoom.tick / 60, Math.max(0, actor.landingUntil - time) / 1000));
       const visiblePlayer = (p.stocks > 0 || activeRoom.phase === 'lobby') && p.respawn <= 0;
       actor.container.setPosition(actor.x, actor.y).setVisible(visiblePlayer);
       actor.sprite.setFlipX(p.facing < 0).setAlpha(p.invulnerable > 0 && Math.floor(time / 85) % 2 ? 0.42 : 1);
       actor.sprite.setRotation(p.dodge > 0 ? Math.sin(time / 40) * 0.15 : p.stun > 0 ? Math.max(-0.6, Math.min(0.6, p.vx / 1600)) : 0);
-      if (p.stun > 0) actor.sprite.setTint(0xffa6a1); else if (!p.connected) actor.sprite.setTint(0x8c9ca9); else actor.sprite.clearTint();
-      const stride = p.grounded && Math.abs(p.vx) > 30 ? Math.sin(time / 65) * 0.06 : 0;
-      const squash = p.grounded && p.guarding ? 0.87 : 1;
-      actor.sprite.setScale(p.fighter === 'rivet' ? 1.15 + stride : 1 + stride, squash - stride);
-      actor.label.setText(p.id === localId ? `${p.name} ◂ YOU` : p.name).setColor(p.team === 'sun' ? '#f6d77a' : '#96e3f4');
+      if (!settings.reduced && performance.now() < actor.flashUntil) actor.sprite.setTintFill(0xfff2c6); else if (p.stun > 0) actor.sprite.setTint(0xffa6a1); else if (!p.connected) actor.sprite.setTint(0x8c9ca9); else actor.sprite.clearTint();
+      actor.sprite.setScale(1);
+      actor.label.setText(p.id === localId ? `${p.name.slice(0, 10)} ◂ YOU` : `${activeRoom.players.filter(q => !q.spectator).findIndex(q => q.id === p.id) + 1} ${p.name.slice(0, 8)}`).setColor(p.team === 'sun' ? '#f6d77a' : '#96e3f4');
       actor.label.setFontSize(p.id === localId ? 13 : 11).setAlpha(p.id === localId ? 1 : 0.8);
       const mark = actor.marker; mark.clear();
       mark.fillStyle(0x000000, 0.25); mark.fillEllipse(0, 21, p.fighter === 'rivet' ? 40 : 31, 9);
@@ -414,9 +430,15 @@ class RelayStation extends Phaser.Scene {
       if (p.guarding) { mark.lineStyle(2, color, 0.45 + p.guard / 200); mark.fillStyle(color, 0.08); mark.fillCircle(0, 0, 31); mark.strokeCircle(0, 0, 31); }
       if (p.invulnerable > 0) { mark.lineStyle(1.5, 0xeaf7ff, 0.6); mark.strokeEllipse(0, 0, 40, 53); }
       if (p.charge > 0) { const radius = 4 + p.charge * 10; mark.fillStyle(FIGHTERS[p.fighter].color, 0.15); mark.fillCircle(p.facing * 22, -1, radius + 5); mark.fillStyle(0xeeffff, 0.8); mark.fillCircle(p.facing * 22, -1, radius / 2); }
+      const danger = p.y > ARENA.bounds.bottom - 260 || p.x < ARENA.bounds.left + 220 || p.x > ARENA.bounds.right - 220 || p.y < ARENA.bounds.top + 190;
+      if (danger && visiblePlayer) {
+        mark.lineStyle(2, 0xffab7d, settings.reduced ? 0.8 : 0.55 + Math.sin(time / 130) * 0.25); mark.strokeCircle(0, 0, 35);
+        mark.fillStyle(0xffab7d); mark.fillTriangle(-4, 42, 4, 42, 0, 48);
+        if (p.id === localId) { actor.label.setText(`${p.name} · DANGER`).setColor('#ffb58b'); }
+      }
       if (p.id === localId && p.cooldown > 0) { mark.fillStyle(0x0b1521, 0.9); mark.fillRect(-16, 36, 32, 3); mark.fillStyle(color); mark.fillRect(-16, 36, 32 * (1 - Math.min(p.cooldown / 3, 1)), 3); }
       if (!settings.reduced && visiblePlayer && Math.hypot(p.vx, p.vy) > 600) { const speed = Math.hypot(p.vx, p.vy); this.effects.lineStyle(p.stun > 0 ? 5 : 3, color, 0.24); this.effects.lineBetween(actor.x, actor.y, actor.x - p.vx / speed * 40, actor.y - p.vy / speed * 40); }
-      if (p.attack && visiblePlayer) this.drawAttack(p, actor.x, actor.y, time);
+      if (p.attack && visiblePlayer) this.drawAttack(visualPlayer, actor.x, actor.y, time);
       if (this.lastGround.get(p.id) === false && p.grounded && visiblePlayer && !settings.reduced) this.spark(actor.x, actor.y + 22, 0x8ab0bf, 3, 18);
       this.lastGround.set(p.id, p.grounded);
       const outside = visiblePlayer && (actor.x < visible.x + 28 || actor.x > visible.right - 28 || actor.y < visible.y + 50 || actor.y > visible.bottom - 40);
@@ -435,27 +457,68 @@ class RelayStation extends Phaser.Scene {
     }
     for (const event of activeRoom.events) if (event.id > this.eventId) {
       this.eventId = event.id;
-      if (event.kind === 'hit' || event.kind === 'guard') { this.spark(event.x, event.y, event.kind === 'guard' ? 0xd8f8ff : teamColor(event.team), settings.reduced ? 2 : 8, 70); if (!settings.reduced && event.kind === 'hit' && activeRoom.players.some(p => p.id === localId && Math.hypot(p.x - event.x, p.y - event.y) < 45)) c.shake(70, 0.002); }
+      if (event.kind === 'hit' && activeRoom.tick - event.tick < 12) {
+        const heavy = (event.damage ?? 0) >= 14;
+        for (const id of [event.victim, event.attacker]) {
+          const actor = id ? this.actors.get(id) : undefined;
+          if (actor && !settings.reduced) { actor.freezeUntil = performance.now() + (heavy ? 65 : 40); if (id === event.victim) actor.flashUntil = performance.now() + 95; }
+        }
+        const length = Math.hypot(event.dx ?? 0, event.dy ?? 0) || 1;
+        const nx = (event.dx ?? 1) / length, ny = (event.dy ?? 0) / length;
+        this.effects.lineStyle(heavy ? 5 : 3, 0xfff3c2, 0.9);
+        this.effects.lineBetween(event.x - nx * 18, event.y - ny * 18, event.x + nx * (heavy ? 60 : 35), event.y + ny * (heavy ? 60 : 35));
+        if (heavy) audio.play('heavy');
+      }
+      if (event.kind === 'hit'  || event.kind === 'guard') { this.spark(event.x, event.y, event.kind === 'guard' ? 0xd8f8ff : teamColor(event.team), settings.reduced ? 2 : 8, 70); if (!settings.reduced && event.kind === 'hit' && activeRoom.players.some(p => p.id === localId && Math.hypot(p.x - event.x, p.y - event.y) < 45)) c.shake(70, 0.002); }
       if (event.kind === 'ko') { this.spark(Phaser.Math.Clamp(event.x, visible.x + 10, visible.right - 10), Phaser.Math.Clamp(event.y, visible.y + 10, visible.bottom - 10), teamColor(event.team), settings.reduced ? 4 : 18, 210); if (!settings.reduced) c.shake(180, 0.003); }
       if (event.kind === 'respawn') this.spark(event.x, event.y, 0xb6f1ec, settings.reduced ? 3 : 10, 80);
     }
     if (activeRoom.phase === 'active' && performance.now() - latestAt > 1500) $('#arena-status').textContent = 'SIGNAL DELAYED · WAITING FOR SERVER'; else $('#arena-status').textContent = `${activeRoom.training ? 'TRAINING' : 'SERVER-AUTHORITATIVE'} · ${latency} MS · 60 HZ`;
   }
   private drawAttack(p: Player, x: number, y: number, time: number) {
-    const attack = p.attack!, g = this.effects, color = FIGHTERS[p.fighter].color;
-    const direction = Math.atan2(attack.dy, attack.dx), active = attack.age >= attack.startup && attack.age < attack.startup + attack.active;
-    if (attack.age < attack.startup) { g.lineStyle(1.5, color, 0.45); const radius = 18 + 8 * (attack.age / Math.max(attack.startup, 0.01)); g.strokeCircle(x + attack.dx * 10, y + attack.dy * 10, radius); return; }
+    const a = p.attack!, g = this.effects, color = FIGHTERS[p.fighter].color;
+    const aim = Math.atan2(a.dy, a.dx), started = a.age >= a.startup, active = started && a.age < a.startup + a.active;
+    const radial = ['pulse', 'burst', 'hammer', 'blades'].includes(a.kind);
+    if (!started) {
+      const anticipation = a.age / Math.max(a.startup, 0.001);
+      g.lineStyle(1, color, 0.25 + anticipation * 0.4);
+      if (a.kind === 'burst') { g.strokeCircle(x, y, a.reach * anticipation); for (let i = 0; i < 4; i++) { const angle = i * Math.PI / 2 + time / 800; g.fillStyle(color, 0.65); g.fillRect(x + Math.cos(angle) * a.reach * anticipation - 2, y + Math.sin(angle) * a.reach * anticipation - 2, 4, 4); } }
+      else { const wx = x + Math.cos(aim) * 23, wy = y + Math.sin(aim) * 23; g.strokeCircle(wx, wy, 7 + anticipation * 6); }
+      return;
+    }
     if (!active) return;
-    if (['cannon', 'shard', 'shockwave'].includes(attack.kind)) return;
-    if (attack.kind === 'counter') { g.lineStyle(3, 0xd4c3ff, 0.8); g.strokeCircle(x, y, 38); g.lineStyle(1, 0xd4c3ff, 0.3); g.strokeCircle(x, y, 44); return; }
-    if (attack.kind === 'field') return;
-    const radius = Math.min(attack.reach, 220), span = attack.kind === 'hammer' ? 1.65 : 1.05;
-    if (['pulse', 'burst', 'hammer', 'blades'].includes(attack.kind)) { g.fillStyle(color, settings.reduced ? 0.04 : 0.08); g.fillCircle(x, y, radius); g.lineStyle(attack.kind === 'hammer' ? 3 : 2, color, 0.65); g.strokeCircle(x, y, radius); }
-    g.fillStyle(color, settings.reduced ? 0.12 : 0.2);
-    const points = [{ x, y }]; for (let i = 0; i <= 12; i++) { const angle = direction - span + span * 2 * (i / 12); points.push({ x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius }); } g.fillPoints(points, true);
-    g.lineStyle(p.fighter === 'rivet' ? 5 : 3, color, 0.9); g.beginPath(); for (let i = 0; i <= 10; i++) { const angle = direction - span * 0.85 + span * 1.7 * (i / 10); const px = x + Math.cos(angle) * radius * 0.9, py = y + Math.sin(angle) * radius * 0.9; if (!i) g.moveTo(px, py); else g.lineTo(px, py); } g.strokePath();
-    g.lineStyle(1.5, 0xffffff, 0.8); const slash = direction - span + span * 2 * Math.max(0, Math.min(1, (attack.age - attack.startup) / Math.max(0.01, attack.active))); g.lineBetween(x + Math.cos(slash) * radius * 0.4, y + Math.sin(slash) * radius * 0.4, x + Math.cos(slash) * radius, y + Math.sin(slash) * radius);
-    if ((attack.kind === 'recovery' || attack.kind === 'dash') && !settings.reduced) { g.lineStyle(4, color, 0.35); g.lineBetween(x, y, x - Math.cos(direction) * 65, y - Math.sin(direction) * 65); }
+    const contact = Phaser.Math.Clamp((a.age - a.startup) / a.active, 0, 1);
+    if (['cannon', 'shard', 'shockwave'].includes(a.kind)) {
+      g.fillStyle(color, 0.35); g.fillTriangle(x + p.facing * 22, y - 11, x + p.facing * 22, y + 5, x + p.facing * 46, y - 3);
+      if (!settings.reduced) { g.fillStyle(0xf1ffff); g.fillRect(x + p.facing * 27 - 3, y - 6, 6, 6); }
+      return;
+    }
+    if (a.kind === 'counter') { g.lineStyle(2, 0xd4c3ff, 0.8); g.strokeCircle(x, y, 30); g.strokeCircle(x, y, 36); return; }
+    if (a.kind === 'field') return;
+    if (a.kind === 'pull') {
+      g.lineStyle(2, color, 0.75);
+      for (let i = 0; i < 3; i++) { const distance = a.reach * (1 - (contact + i / 3) % 1); const px = x + p.facing * distance; g.lineBetween(px, y - 20, px - p.facing * 12, y); g.lineBetween(px - p.facing * 12, y, px, y + 20); }
+      return;
+    }
+    if (radial) {
+      g.lineStyle(a.kind === 'hammer' ? 5 : 2, color, 0.75); g.fillStyle(color, settings.reduced ? 0.025 : 0.065); g.fillCircle(x, y, a.reach); g.strokeCircle(x, y, a.reach);
+      if (a.kind === 'pulse' || a.kind === 'burst') { g.lineStyle(2, 0xe8ffff, 0.6); g.strokeCircle(x, y, a.reach * contact); return; }
+    }
+    const span = p.fighter === 'rivet' ? 1.8 : p.fighter === 'wisp' ? 1.2 : 0.75;
+    const start = aim - span, end = aim + span * (0.1 + contact * 1.9);
+    const drawArc = (radius: number, tint: number, width: number, alpha: number, offset = 0) => {
+      g.lineStyle(width, tint, alpha); g.beginPath();
+      for (let i = 0; i <= 16; i++) { const angle = Phaser.Math.Linear(start, end, i / 16); const px = x + Math.cos(angle + offset) * radius, py = y + Math.sin(angle + offset) * radius; if (!i) g.moveTo(px, py); else g.lineTo(px, py); } g.strokePath();
+    };
+    drawArc(a.reach * 0.82, color, p.fighter === 'rivet' ? 8 : 4, 0.8);
+    drawArc(a.reach * 0.9, 0xf0ffff, 1.5, 0.9);
+    if (p.fighter === 'wisp') drawArc(a.reach * 0.65, 0x9ffff0, 3, 0.7, 0.45);
+    if (p.fighter === 'morrow') {
+      for (let i = 0; i < 3; i++) { const angle = aim - 0.5 + i * 0.5; const px = x + Math.cos(angle) * a.reach * contact, py = y + Math.sin(angle) * a.reach * contact; g.fillStyle(color, 0.9); g.fillPoints([{ x: px, y: py - 5 }, { x: px + 4, y: py }, { x: px, y: py + 5 }, { x: px - 4, y: py }], true); }
+    }
+    if (a.kind === 'recovery' || a.kind === 'dash' || a.kind === 'blink') {
+      g.lineStyle(4, color, 0.45); g.lineBetween(x, y + 12, x - Math.cos(aim) * 60, y - Math.sin(aim) * 60);
+    }
   }
   private spark(x: number, y: number, color: number, count: number, spread: number) {
     if (this.particles > 180) return;

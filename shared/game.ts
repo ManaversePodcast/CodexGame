@@ -39,7 +39,7 @@ export type Player = {
 };
 export type Projectile = { id: number; owner: string; team: Team; x: number; y: number; vx: number; vy: number; radius: number; life: number; kind: 'shot' | 'shard' | 'wave' | 'burst'; damage: number };
 export type Field = { id: number; owner: string; team: Team; x: number; y: number; radius: number; life: number };
-export type GameEvent = { id: number; kind: 'hit' | 'ko' | 'guard' | 'respawn'; x: number; y: number; text: string; team: Team };
+export type GameEvent = { id: number; kind: 'hit' | 'ko' | 'guard' | 'respawn'; x: number; y: number; text: string; team: Team; tick: number; victim: string; attacker?: string; dx?: number; dy?: number; damage?: number };
 export type RoomState = {
   code: string; host: string; phase: Phase; countdown: number; remaining: number; tick: number; training: boolean; paused: boolean;
   players: Player[]; projectiles: Projectile[]; fields: Field[]; events: GameEvent[];

@@ -351,3 +351,84 @@ test('guard on the impact tick protects regardless of room membership order', ()
     assert.ok(b.guard < 90, 'the incoming attack must have been blocked');
   }
 });
+
+test('an attack buffered near recovery executes once without shortening the current attack', () => {
+  const { room, a } = fixture();
+  tick(room, 1, new Map([[a.id, { ...idle(), attack: true }]]));
+  const first = a.attack!;
+  tick(room, 24);
+  tick(room, 1, new Map([[a.id, { ...idle(), attack: true }]]));
+  assert.equal(a.attack, first);
+  let second = null;
+  for (let i = 0; i < 9; i++) {
+    tick(room);
+    if (a.attack && a.attack !== first) { second = a.attack; break; }
+  }
+  assert.ok(second, 'the buffered press executes as soon as recovery ends');
+  assert.ok(first.age >= first.total, 'buffering must not cancel recovery');
+  tick(room, 70);
+  assert.equal(a.attack, null, 'a queued press executes once');
+});
+
+test('old inputs expire and the newest combat press chooses its stored direction', () => {
+  const expired = fixture();
+  tick(expired.room, 1, new Map([[expired.a.id, { ...idle(), attack: true }]]));
+  tick(expired.room);
+  tick(expired.room, 1, new Map([[expired.a.id, { ...idle(), attack: true }]]));
+  tick(expired.room, 60);
+  assert.equal(expired.a.attack, null, 'a press too early in recovery expires');
+
+  const { room, a } = fixture();
+  tick(room, 1, new Map([[a.id, { ...idle(), attack: true }]])); tick(room, 24);
+  tick(room, 1, new Map([[a.id, { ...idle(), attack: true, down: true }]])); tick(room);
+  tick(room, 1, new Map([[a.id, { ...idle(), special: true, up: true }]]));
+  tick(room, 8);
+  assert.equal(a.attack?.kind, 'recovery'); assert.equal(a.recoveryUsed, true);
+});
+
+test('buffered jumps wait for landing and never grant a third air jump', () => {
+  const { room, a } = fixture();
+  a.x = 760; a.y = 670; a.vy = 160; a.grounded = false; a.jumps = 2;
+  tick(room, 1, new Map([[a.id, { ...idle(), jump: true }]]));
+  assert.ok(a.vy > 0, 'spent air jumps cannot be bypassed');
+  tick(room, 9);
+  assert.ok(a.vy < 0, 'a recent press launches after safe landing');
+  assert.equal(a.jumps, 1);
+});
+
+test('death, pause, disconnect and rematch discard pending actions', () => {
+  for (const transition of ['death', 'pause', 'disconnect', 'rematch']) {
+    const { room, a } = fixture();
+    tick(room, 1, new Map([[a.id, { ...idle(), attack: true }]])); tick(room, 24);
+    tick(room, 1, new Map([[a.id, { ...idle(), attack: true }]]));
+    if (transition === 'death') { a.y = ARENA.bounds.bottom + 10; tick(room); tick(room, 125); }
+    if (transition === 'pause') { room.paused = true; tick(room); room.paused = false; }
+    if (transition === 'disconnect') { a.connected = false; tick(room); a.connected = true; }
+    if (transition === 'rematch') { resetLobby(room); startMatch(room); tick(room, 181); }
+    tick(room, 12);
+    assert.equal(a.attack, null, `${transition} must discard the old buffer`);
+  }
+});
+
+test('holding an action through a respawn does not replay it or cancel protection', () => {
+  const { room, a } = fixture();
+  const held = new Map([[a.id, { ...idle(), attack: true }]]);
+  tick(room, 1, held);
+  a.y = ARENA.bounds.bottom + 10; tick(room, 1, held);
+  tick(room, 130, held);
+  assert.equal(a.respawn, 0); assert.equal(a.attack, null);
+  assert.ok(a.invulnerable > 0, 'only a fresh press should cancel respawn protection');
+  tick(room); tick(room, 1, held);
+  assert.ok(a.attack); assert.equal(a.invulnerable, 0);
+});
+
+test('releasing a buffered jump on its execution tick applies the short-hop cut once', () => {
+  const { room, a } = fixture();
+  tick(room, 1, new Map([[a.id, { ...idle(), attack: true }]])); tick(room, 24);
+  const jump = new Map([[a.id, { ...idle(), jump: true }]]);
+  tick(room, 6, jump);
+  assert.equal(a.attack, null); assert.equal(a.grounded, true);
+  tick(room);
+  assert.equal(a.jumps, 1);
+  assert.ok(a.vy < -250 && a.vy > -400, 'the hop must keep its normal short-jump impulse, not be cut twice');
+});

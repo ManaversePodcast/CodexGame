@@ -26,7 +26,7 @@ The deck is solid on all sides. Elevated platforms are one-way, with down+jump d
 | Wisp | 7 | 55 | 4 | 6 | 12 | 365 | 0.78 |
 | Morrow | 10 | 70 | 9 | 6 | 21 | 270 | 1.05 |
 
-The shared attack family supports ground/air × neutral/forward/up/down. Forward increases base damage by 15%, up reduces it by 10%, and down increases it by 10%. Up/down use vertical hit regions; neutral/forward use a facing region. Horizontal attacks launch outward and upward. Air-down can spike. Each fighter has different timing, damage, reach, mass, speed, jump strength, and special moves; basic animations are placeholder procedural poses.
+The shared attack family supports ground/air × neutral/forward/up/down. Forward increases base damage by 15%, up reduces it by 10%, and down increases it by 10%. Up/down use vertical hit regions; neutral/forward use a facing region. Horizontal attacks launch outward and upward. Air-down can spike. Each fighter has different timing, damage, reach, mass, speed, jump strength, and special moves; basic animations use six-frame directional startup/contact/recovery keyframes and fighter-specific weapon poses. Ground and air share the directional frame sets.
 
 ## Specials
 
@@ -54,4 +54,4 @@ Ground jump and one air jump, variable jump release, acceleration/braking, and a
 
 ## Tuning limitations
 
-No final animation assets, multi-hit attacks, grabs, collision between fighters, hit-pause, or rollback. The moves above are the prototype interpretation of the roster; tune with actual team play before adding content. Recovery effects share the same basic strike; each fighter's directional air steering and boost differ. Runtime values in `shared/game.ts` and `shared/simulation.ts` are authoritative if this sheet drifts.
+Animation assets remain provisional. No multi-hit attacks, grabs, fighter body collision, mechanical hit-pause, or rollback. Local visual hit-stop never pauses server combat. Jump/attack/special inputs may buffer for 120 ms before becoming legal; no timing in this sheet is shortened by buffering. The moves above are the prototype interpretation of the roster; tune with actual team play before adding content. Recovery effects share the same basic strike; each fighter's directional air steering and boost differ. Runtime values in `shared/game.ts` and `shared/simulation.ts` are authoritative if this sheet drifts.

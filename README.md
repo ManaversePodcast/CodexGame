@@ -1,43 +1,89 @@
-# Codex Game · Pixel Commons
+# Riftfall
 
-A playable browser multiplayer foundation for a 2D pixel game. Open two tabs to see players share the same world. Move with WASD or arrow keys.
+A browser prototype of an original pixel-art team platform fighter. Create a private room, choose one of four fighters, and battle with up to ten players across two teams. Each fighter has three personal stocks; the last surviving team wins.
 
-## Stack
+Built with TypeScript, Phaser 3, Vite, and a Node.js authoritative WebSocket server. Pixel characters, scenery, and effects are generated locally; no asset downloads, account, database, or API keys are required.
 
-- **TypeScript + Phaser 3:** mature 2D rendering, crisp pixel scaling, and a path to tilemaps, animation, audio, and physics. Runs in modern desktop browsers without a client install.
-- **Node.js + WebSocket:** one authoritative room; clients send directional input, never positions. The server simulates and broadcasts at 20 Hz; clients interpolate snapshots.
-- **Vite:** fast client development and production bundling. Shared TypeScript defines movement rules and message types.
+## Run on Windows
 
-The starter uses procedural pixel characters and scenery, with no external assets, keys, databases, or paid services.
+Install **Node.js 24 LTS** (minimum 22.12) and **Git** first. Development is validated with Node 24. In Windows Command Prompt, clone and start:
 
-## Develop
+```cmd
+cd /d "%USERPROFILE%"
+git clone https://github.com/ManaversePodcast/CodexGame.git
+cd CodexGame
+npm ci
+npm run dev
+```
 
-Use Node.js 22 or newer (validated with Node 24).
+If you already have the repository, update and start it instead:
+
+```cmd
+cd /d "%USERPROFILE%\CodexGame"
+git pull
+npm ci
+npm run dev
+```
+
+Open **http://localhost:5173**. Keep the terminal running. Other players need to open the same running server, then enter its room code; a room code does not connect separate local servers. For play across the internet, deploy the server to a shared Node.js host.
+
+## Develop in the cloud or on macOS/Linux
+
+From the repository directory:
 
 ```sh
 npm ci
 npm run dev
 ```
 
-Vite serves the game on port 5173 and proxies `/ws` to the game server on port 3001. Open the Vite address in two desktop browser tabs. The online count should reach two; movement in either focused tab appears in both. Input stops on loss of focus; disconnected clients are removed. Clients reconnect automatically.
+In the Codex cloud checkout, the directory is `/workspace/CodexGame`. That path belongs to the cloud machine; use the Windows commands above on your own PC.
+
+The Vite client runs on port **5173**, proxies `/ws` to the game server on **3001**, and listens on all interfaces for development. Cloud onboarding validates the server using local requests; run the Windows instructions above to play on your PC.
 
 ```sh
-npm test           # movement rules and real two-client WebSocket integration
-npm run build      # strict type checks, client bundle, server compilation
-npm start          # serves built game and WebSocket endpoint together on port 3001
+npm test           # simulation regressions and real WebSocket room integration
+npm run typecheck  # strict client/shared/server TypeScript checks
+npm run build      # type checks, client bundle, server compilation
+npm start          # serve the production build on port 3001
+npm run profile    # repeatable ten-fighter simulation CPU/snapshot diagnostic
+npm run smoke:rooms # two full ten-client matches against an already running server
 ```
 
-Production supports `PORT` (default 3001). `/health` returns JSON. Run `npm start` from the repository root. Deploy the built `dist` directory, package manifests, and production npm dependencies to a Node host with persistent WebSocket support. Terminate HTTPS at a reverse proxy that forwards WebSocket upgrades; the client automatically uses WSS under HTTPS. Static-only hosting cannot run the multiplayer server.
+## Play
+
+Create a room and share its code, choose your fighter and Solar/Lunar team, and ready up. The host starts the match after everyone is ready. Each team supports five fighters; smaller matches work too. Unequal teams require the host's explicit confirmation. A solo training room provides a dummy, unlimited lives, and pause.
+
+| Action | Keyboard | Standard gamepad |
+| --- | --- | --- |
+| Move / aim | WASD or arrows | Left stick / D-pad |
+| Jump / air jump | Space | A / Cross |
+| Attack | J | X / Square |
+| Special | K | Y / Triangle |
+| Guard / directional dodge | L or Shift | Right trigger / bumper |
+| Drop through one-way platform | Down + jump | Down + jump |
+| Recovery special | Up + special | Up + special |
+
+Direction selects up, down, or forward attacks; neutral attacks use your facing direction. Jump is a separate button. Release and press again for a second jump or another attack. Guard works on the ground; a direction plus guard dodges. Use your recovery special and one air dodge to return to the stage. Falling beyond the blast boundary costs a stock. Eliminated players watch until results and rematch.
+
+The settings menu saves keyboard bindings, high contrast, reduced effects, and separate effects/ambient volume locally. Ping is visible during play. Training can be paused; multiplayer battles keep running.
+
+## Project documentation
+
+- [Game design](docs/GAME_DESIGN.md): the agreed direction, full intended scope, and milestone gates.
+- [Prototype scope and validation](docs/PROTOTYPE.md): what is implemented, rules, architecture, and remaining work.
+- [Attack sheets](docs/ATTACK_SHEETS.md): current move tuning and counterplay.
+
+## Production hosting
+
+Run `npm run build`, then `npm start` from the repository root. `PORT` defaults to 3001. The HTTP server hosts `dist/client`, `/health` returns JSON, and `/ws` accepts WebSocket connections. Deploy the built `dist` directory, package manifests, and production npm dependencies to a host that supports persistent Node.js processes and WebSocket upgrades. The browser chooses WSS automatically when the page uses HTTPS.
+
+Use a reverse proxy for HTTPS and WebSocket forwarding. Browser WebSocket origins default to the serving hostname. Set optional `ALLOWED_ORIGINS` to comma-separated exact permitted origins (such as `https://game.example.com`, without a trailing slash) when deployment needs an explicit allowlist. Static-only hosting cannot run the multiplayer server. Each server keeps its own rooms in memory; restart loses matches. Multiple replicas require room routing. This prototype is intended for private playtests; public operation still needs a reviewed deployment origin policy, monitoring, abuse controls, and measured capacity/latency testing.
 
 ## Layout
 
-- `src/`: Phaser scene, networking, keyboard input, and page styles.
-- `server/`: HTTP hosting and authoritative multiplayer simulation.
-- `shared/`: world dimensions, protocol types, input validation, and movement.
-- `tests/`: simulation and multiplayer integration checks.
-
-## Current scope
-
-One public, in-memory room with up to 64 connections. State resets when the server restarts. Includes bounded movement, diagonal speed normalization, malformed-input handling, stale-input timeout, connection heartbeat, payload limits, and slow-client backpressure limits. Rendering smooths network updates; local prediction and reconciliation are future work.
-
-This is a development foundation, not a public service launch. Before a public release add authentication, origin policy appropriate to the deployment, per-client message rate limits, rooms/matchmaking, persistence if needed, monitoring, and load testing. Multiple server replicas require room routing. Combat, inventory, art production, mobile controls, and game-specific rules are intentionally left for the game design.
+- `src/`: Phaser rendering, lobby/HUD, controls, audio, and networking.
+- `shared/game.ts`: types, fighter definitions, arena geometry, input validation.
+- `shared/simulation.ts`: fixed-step movement, combat, stocks, and match rules.
+- `server/`: room/session lifecycle and HTTP/WebSocket hosting.
+- `tests/`: deterministic gameplay tests and socket integration tests.
+- `scripts/`: simulation profiling and full-match WebSocket smoke checks.
